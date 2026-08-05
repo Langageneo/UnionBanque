@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  CLIENT
+}
+
+enum Currency {
+  EUR
+  XOF
+  USD
+  GBP
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  BUSINESS
+}
+
+enum AccountStatus {
+  ACTIVE
+  BLOCKED
+  FROZEN_LEGAL
+  KYC_REVIEW
+  PENDING_DOCUMENTS
+  CLOSED
+}
+
+model User {
+  id           String       @id @default(uuid())
+  customerNumber String     @unique @default(cuid())
+  email        String       @unique
+  password     String
+  firstName    String
+  lastName     String
+  role         Role         @default(CLIENT)
+  refreshToken String?
+
+  phone        String?
+  addressLine  String?
+  city         String?
+  country      String?
+  advisorName  String?
+  kycStatus    KycStatus    @default(PENDING)
+  clientStatus ClientStatus @default(ACTIVE)
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  accounts Account[]
+}
+
+model Account {
+  id            String        @id @default(uuid())
+  accountNumber String        @unique
+  balance       Decimal       @default(0) @db.Decimal(19, 4)
+  currency      Currency      @default(EUR)
+  accountType   AccountType   @default(CHECKING)
+  status        AccountStatus @default(ACTIVE)
+  statusReason  String?
+  overdraftLimit Decimal      @default(0) @db.Decimal(19, 4)
+  version       Int           @default(0)
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  ledgerEntries       LedgerEntry[]
+  transactionsSource  Transaction[] @relation("SourceAccount")
+  transactionsDest    Transaction[] @relation("DestinationAccount")
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  key            String   @unique
+  requestHash    String
+  responseStatus Int?
+  responseBody   Json?
+  status         String   @default("PROCESSING")
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  transaction    Transaction?
+}
+
+model Transaction {
+  id                    String             @id @default(uuid())
+  reference             String             @unique
+  type                  TransactionType
+  status                TransactionStatus  @default(PENDING)
+  amount                Decimal            @db.Decimal(19, 4)
+  sourceAccountId       String?
+  sourceAccount         Account?           @relation("SourceAccount", fields: [sourceAccountId], references: [id])
+  destinationAccountId  String?
+  destinationAccount    Account?           @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  correlationId         String
+  idempotencyKeyId      String?            @unique
+  idempotencyKey        IdempotencyKey?    @relation(fields: [idempotencyKeyId], references: [id])
+  metadata              Json?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([correlationId])
+}
+
+model LedgerEntry {
+  id            String          @id @default(uuid())
+  transactionId String
+  transaction   Transaction     @relation(fields: [transactionId], references: [id])
+  accountId     String
+  account       Account         @relation(fields: [accountId], references: [id])
+  type          LedgerEntryType
+  amount        Decimal         @db.Decimal(19, 4)
+  balanceAfter  Decimal         @db.Decimal(19, 4)
+  createdAt     DateTime        @default(now())
+
+  @@index([accountId])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorId       String?
+  action        String
+  entityType    String
+  entityId      String
+  before        Json?
+  after         Json?
+  correlationId String?
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([correlationId])
+}
